@@ -1,2 +1,2 @@
 # prediction-markets-arbitrage
-arb across various prediction market exchanges
+arb across prediction market exchanges
