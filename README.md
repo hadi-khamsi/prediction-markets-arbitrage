@@ -1,2 +1,2 @@
 # prediction-markets-arbitrage
-arb across prediction market exchanges
+Real-time terminal scanner for cross-exchange prediction market arbitrage.
