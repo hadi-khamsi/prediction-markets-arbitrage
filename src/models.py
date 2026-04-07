@@ -5,7 +5,7 @@ from datetime import datetime
 @dataclass
 class Contract:
     """A prediction market contract from any exchange."""
-    exchange: str           # "kalshi" or "polymarket"
+    exchange: str           # "kalshi", "polymarket", "predictit"
     id: str                 # exchange-specific identifier
     title: str              # human-readable contract title
     yes_price: float        # price for YES outcome (0.00-1.00)
@@ -30,5 +30,5 @@ class Opportunity:
     total_cost: float       # combined cost of both positions
     fees: float             # combined exchange fees
     profit: float           # guaranteed profit after fees
-    kalshi_action: str      # "BUY YES" or "BUY NO"
-    poly_action: str        # "BUY YES" or "BUY NO"
+    action_a: str           # "BUY YES" or "BUY NO" for contract_a
+    action_b: str           # "BUY YES" or "BUY NO" for contract_b

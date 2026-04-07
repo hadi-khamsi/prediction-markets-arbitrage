@@ -32,13 +32,9 @@ from .models import Contract, MatchedPair
 class ContractMatcher:
     """Finds matching contracts across exchanges using semantic similarity."""
 
-    def __init__(self, min_similarity: float = 0.50):
+    def __init__(self, model_name: str, min_similarity: float = 0.50):
         self.min_similarity = min_similarity
-        # Load model with minimal output
-        self.model = SentenceTransformer(
-            "all-MiniLM-L6-v2",
-            device="cpu",
-        )
+        self.model = SentenceTransformer(model_name, device="cpu")
         self.model.eval()
 
     def find_matches(
