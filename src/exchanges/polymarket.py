@@ -74,9 +74,10 @@ class PolymarketClient:
             end_date = None
             end_date_str = market.get("endDate") or market.get("end_date_iso")
             if end_date_str:
-                end_date = datetime.fromisoformat(
-                    end_date_str.replace("Z", "+00:00")
-                )
+                parsed = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                end_date = parsed
 
             # Get prices from outcome prices or best bid/ask
             # Polymarket prices are already 0.00-1.00

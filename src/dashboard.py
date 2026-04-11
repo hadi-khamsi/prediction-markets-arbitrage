@@ -2,6 +2,7 @@ from datetime import datetime
 
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
 from .models import Opportunity
 
@@ -16,33 +17,53 @@ EXCHANGE_LABELS = {
 class Dashboard:
     """Terminal dashboard for displaying arbitrage opportunities."""
 
-    def __init__(self, max_rows: int = 10, title_width: int = 30):
+    def __init__(self, max_rows: int = 10, title_width: int = 40):
         self.max_rows = max_rows
         self.title_width = title_width
         self.console = Console()
-        if self.console.width < 120:
-            self.console = Console(width=120)
+        if self.console.width < 140:
+            self.console = Console(width=140)
 
     def render(
         self,
         opportunities: list[Opportunity],
         exchange_counts: dict[str, int],
         matched_count: int,
+        latencies: dict[str, int] | None = None,
     ) -> None:
         """Render the dashboard with current opportunities."""
         self.console.clear()
 
         now = datetime.now().strftime("%H:%M:%S")
-        counts_str = " | ".join(
-            f"{EXCHANGE_LABELS.get(ex, ex[:3].upper())}:{cnt}"
-            for ex, cnt in exchange_counts.items()
-        )
-        self.console.print("ARB SCANNER", style="bold")
-        self.console.print(f"Last Updated: {now} | {counts_str} | Matched:{matched_count} | Arb:{len(opportunities)}")
+
+        # Header line 1: Title and status
+        header = Text()
+        header.append("ARB SCANNER", style="bold white")
+        header.append("  ")
+        header.append("● LIVE", style="bold green")
+        self.console.print(header)
+
+        # Header line 2: Stats
+        counts_parts = []
+        for ex, cnt in exchange_counts.items():
+            label = EXCHANGE_LABELS.get(ex, ex[:3].upper())
+            lat = ""
+            if latencies and ex in latencies:
+                lat = f" ({latencies[ex]}ms)"
+            counts_parts.append(f"{label}:{cnt}{lat}")
+        counts_str = " | ".join(counts_parts)
+
+        stats = Text()
+        stats.append(f"Updated: {now}", style="cyan")
+        stats.append(f"  {counts_str}", style="white")
+        stats.append(f"  Matched:{matched_count}", style="yellow")
+        stats.append(f"  Arb:{len(opportunities)}", style="green" if opportunities else "dim")
+        self.console.print(stats)
         self.console.print()
 
         if not opportunities:
-            self.console.print("No arbitrage. All spreads negative.", style="dim")
+            self.console.print("No arbitrage opportunities. All spreads negative.", style="dim")
+            self.console.print()
             self.console.print("Ctrl+C to exit", style="dim")
             return
 
@@ -50,18 +71,19 @@ class Dashboard:
         if self.max_rows > 0:
             display_opps = opportunities[: self.max_rows]
 
-        table = Table(show_header=True, header_style="bold", box=None, expand=False)
+        table = Table(show_header=True, header_style="bold", box=None, expand=False, padding=(0, 1))
         table.add_column("#", width=2, no_wrap=True)
         table.add_column("PROFIT", style="green", width=7, no_wrap=True)
-        table.add_column("SIM", width=3, no_wrap=True)
-        table.add_column("EX1", width=self.title_width, overflow="ellipsis", no_wrap=True)
-        table.add_column("$1", width=4, no_wrap=True)
-        table.add_column("V1", width=5, no_wrap=True)
-        table.add_column("EX2", width=self.title_width, overflow="ellipsis", no_wrap=True)
-        table.add_column("$2", width=4, no_wrap=True)
-        table.add_column("V2", width=5, no_wrap=True)
+        table.add_column("SIM", width=4, no_wrap=True)
+        table.add_column("TYPE", width=4, no_wrap=True)
+        table.add_column("CONTRACT 1", width=self.title_width, overflow="fold")
+        table.add_column("$", width=4, no_wrap=True)
+        table.add_column("VOL", width=5, no_wrap=True)
+        table.add_column("CONTRACT 2", width=self.title_width, overflow="fold")
+        table.add_column("$", width=4, no_wrap=True)
+        table.add_column("VOL", width=5, no_wrap=True)
         table.add_column("EXP", width=5, no_wrap=True)
-        table.add_column("ACT", width=11, no_wrap=True)
+        table.add_column("ACTION", width=13, no_wrap=True)
 
         for i, opp in enumerate(display_opps, 1):
             a = opp.pair.contract_a
@@ -82,14 +104,22 @@ class Dashboard:
             act_b = "Y" if "YES" in opp.action_b else "N"
             action = f"{label_a}:{act_a} {label_b}:{act_b}"
 
+            # Format title with exchange prefix
+            title_a = f"[{label_a}] {a.title}"
+            title_b = f"[{label_b}] {b.title}"
+
+            # Match type indicator
+            match_type = opp.pair.match_type[:3].upper()  # "IDE" or "OPP"
+
             table.add_row(
                 str(i),
                 f"${opp.profit:.3f}",
                 f"{opp.pair.similarity:.0%}",
-                a.title,
+                match_type,
+                title_a,
                 f"{price_a:.2f}",
                 self._format_volume(a.volume),
-                b.title,
+                title_b,
                 f"{price_b:.2f}",
                 self._format_volume(b.volume),
                 exp,
@@ -119,4 +149,3 @@ class Dashboard:
         if vol >= 1_000:
             return f"${vol/1_000:.0f}k"
         return f"${vol:.0f}"
-

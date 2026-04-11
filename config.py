@@ -5,8 +5,12 @@ SCAN_INTERVAL = 15           # seconds between refreshes
 MAX_DAYS_OUT = 100           # only show contracts expiring within N days
 
 # Matching
-SEMANTIC_MODEL = "all-MiniLM-L6-v2"  # sentence-transformers model for contract matching
+SEMANTIC_MODEL = "all-MiniLM-L6-v2"  # sentence-transformers model for embedding
 MIN_SIMILARITY = 0.25                 # minimum semantic similarity to consider a match
+
+# LLM Verification (Ollama)
+LLM_MODEL = "llama3.2:latest"         # ollama model for match classification
+OLLAMA_URL = "http://localhost:11434" # ollama server address
 
 # Arbitrage
 MIN_PROFIT = 0.01          # minimum profit ($) to display
@@ -19,7 +23,7 @@ PREDICTIT_FEE_RATE = 0.00   # PredictIt has 10% profit fee + 5% withdrawal, but 
 
 # Display
 MAX_DISPLAY_ROWS = 10       # max opportunities to show (0 = unlimited)
-CONTRACT_TITLE_WIDTH = 30   # character width for contract title columns
+CONTRACT_TITLE_WIDTH = 40   # character width for contract title columns (text wraps if longer)
 
 # Smart Order Router - venue scoring: score = price + fee + liquidity_penalty
 # Lower score = better venue. Tune these based on your risk tolerance.

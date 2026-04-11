@@ -40,10 +40,12 @@ class PredictItClient:
             # Parse end date
             end_date = None
             end_date_str = contract.get("dateEnd") or market.get("dateEnd")
-            if end_date_str and end_date_str != "N/A":
-                end_date = datetime.fromisoformat(
-                    end_date_str.replace("Z", "+00:00")
-                )
+            if end_date_str and end_date_str not in ("N/A", "NA", "n/a", "na"):
+                # Parse and ensure timezone-aware (assume UTC if not specified)
+                parsed = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                end_date = parsed
 
             # PredictIt prices are in cents (0.01 = 1 cent, 0.99 = 99 cents)
             # Already in 0-1 scale

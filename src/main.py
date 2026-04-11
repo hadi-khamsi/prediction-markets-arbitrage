@@ -2,7 +2,7 @@
 """Arbitrage Scanner - Monitors prediction markets for arbitrage opportunities."""
 
 import sys
-import time
+import time as time_module
 
 from dotenv import load_dotenv
 
@@ -13,6 +13,7 @@ import config
 from .arbitrage import ArbitrageCalculator
 from .dashboard import Dashboard
 from .exchanges import KalshiClient, PolymarketClient, PredictItClient
+from .llm_verifier import LLMVerifier
 from .matcher import ContractMatcher
 from .models import Contract, MatchedPair
 from .router import SmartOrderRouter, LiquidityParams
@@ -90,7 +91,13 @@ def main():
     load_dotenv()
 
     print("Initializing...")
-    print(f"Loading semantic model: {config.SEMANTIC_MODEL}")
+    print(f"Semantic model: {config.SEMANTIC_MODEL}")
+    print(f"LLM model: {config.LLM_MODEL}")
+
+    llm_verifier = LLMVerifier(
+        model=config.LLM_MODEL,
+        ollama_url=config.OLLAMA_URL,
+    )
 
     kalshi = KalshiClient()
     polymarket = PolymarketClient()
@@ -99,6 +106,7 @@ def main():
     matcher = ContractMatcher(
         model_name=config.SEMANTIC_MODEL,
         min_similarity=config.MIN_SIMILARITY,
+        llm_verifier=llm_verifier,
     )
 
     fee_rates = {
@@ -133,28 +141,35 @@ def main():
 
     try:
         while True:
-            # Fetch from all exchanges
+            # Fetch from all exchanges with latency tracking
             exchange_counts = {}
+            latencies = {}
 
+            t0 = time_module.perf_counter()
             try:
                 kalshi_contracts = kalshi.fetch_markets(max_days=config.MAX_DAYS_OUT)
             except Exception as e:
                 print(f"Error fetching Kalshi: {e}")
                 kalshi_contracts = []
+            latencies["kalshi"] = int((time_module.perf_counter() - t0) * 1000)
             exchange_counts["kalshi"] = len(kalshi_contracts)
 
+            t0 = time_module.perf_counter()
             try:
                 poly_contracts = polymarket.fetch_markets(max_days=config.MAX_DAYS_OUT)
             except Exception as e:
                 print(f"Error fetching Polymarket: {e}")
                 poly_contracts = []
+            latencies["polymarket"] = int((time_module.perf_counter() - t0) * 1000)
             exchange_counts["polymarket"] = len(poly_contracts)
 
+            t0 = time_module.perf_counter()
             try:
                 pi_contracts = predictit.fetch_markets(max_days=config.MAX_DAYS_OUT)
             except Exception as e:
                 print(f"Error fetching PredictIt: {e}")
                 pi_contracts = []
+            latencies["predictit"] = int((time_module.perf_counter() - t0) * 1000)
             exchange_counts["predictit"] = len(pi_contracts)
 
             # Match all pairwise combinations
@@ -172,9 +187,10 @@ def main():
                 opportunities=opportunities,
                 exchange_counts=exchange_counts,
                 matched_count=len(deduped),
+                latencies=latencies,
             )
 
-            time.sleep(config.SCAN_INTERVAL)
+            time_module.sleep(config.SCAN_INTERVAL)
 
     except KeyboardInterrupt:
         print("\nShutting down...")

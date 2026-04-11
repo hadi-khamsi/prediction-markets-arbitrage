@@ -72,9 +72,10 @@ class KalshiClient:
             end_date = None
             close_time = market.get("close_time") or event.get("close_time")
             if close_time:
-                end_date = datetime.fromisoformat(
-                    close_time.replace("Z", "+00:00")
-                )
+                parsed = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                end_date = parsed
 
             # Kalshi prices are in dollars (0.00-1.00)
             yes_ask_str = market.get("yes_ask_dollars", "0")
