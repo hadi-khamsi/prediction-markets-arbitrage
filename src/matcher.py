@@ -19,7 +19,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from .models import Contract, MatchedPair
+from .contracts import Contract, MatchedPair
 from .llm_verifier import LLMVerifier
 
 
@@ -66,9 +66,15 @@ class ContractMatcher:
         # Sort by similarity descending for LLM verification
         candidates.sort(key=lambda x: x[2], reverse=True)
 
-        # LLM verification for match type
+        # Pre-filter: skip pairs where no arbitrage is mathematically possible
+        arb_candidates = [
+            (a, b, sim) for a, b, sim in candidates
+            if self._arbitrage_possible(a, b)
+        ]
+
+        # LLM verification for match type (only on pairs with arbitrage potential)
         matches = []
-        for contract_a, contract_b, sim in candidates:
+        for contract_a, contract_b, sim in arb_candidates:
             match_type = self.llm.classify(contract_a.title, contract_b.title)
 
             # Skip unrelated or unsure matches
@@ -106,3 +112,17 @@ class ContractMatcher:
             return True
         diff = abs((a.end_date - b.end_date).total_seconds())
         return diff <= timedelta(days=1).total_seconds()
+
+    def _arbitrage_possible(self, a: Contract, b: Contract) -> bool:
+        """Check if any price combination could yield arbitrage (cost < 1.0).
+
+        We don't know the match type yet, so check all 4 combinations:
+        - Identical match: buy YES on A + NO on B, or NO on A + YES on B
+        - Opposite match: buy YES on both, or NO on both
+        """
+        return (
+            a.yes_price + b.no_price < 1.0 or
+            a.no_price + b.yes_price < 1.0 or
+            a.yes_price + b.yes_price < 1.0 or
+            a.no_price + b.no_price < 1.0
+        )

@@ -52,7 +52,7 @@ class LLMVerifier:
                 "stream": False,
                 "options": {"temperature": 0, "num_predict": 5},
             },
-            timeout=10,
+            timeout=60,
         )
         resp.raise_for_status()
 

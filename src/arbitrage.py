@@ -1,6 +1,6 @@
 import math
 
-from .models import MatchedPair, Opportunity
+from .contracts import MatchedPair, Opportunity
 
 
 def calculate_fee(exchange: str, price: float, fee_rates: dict[str, float]) -> float:

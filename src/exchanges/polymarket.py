@@ -5,12 +5,10 @@ from typing import Optional
 
 import requests
 
-from ..models import Contract
+from ..contracts import Contract
 
 GAMMA_URL = "https://gamma-api.polymarket.com"
-CLOB_URL = "https://clob.polymarket.com"
 REQUEST_DELAY = 0.2  # seconds between paginated requests
-MAX_CONTRACTS = 1000  # limit total contracts to fetch
 
 
 class PolymarketClient:
@@ -56,8 +54,6 @@ class PolymarketClient:
                 if contract.end_date > cutoff_date:
                     continue
                 contracts.append(contract)
-                if len(contracts) >= MAX_CONTRACTS:
-                    return contracts
 
             offset += limit
             if len(markets) < limit:
@@ -99,14 +95,29 @@ class PolymarketClient:
                     yes_price = 0.5
                     no_price = 0.5
 
+            # Parse volume as float (API returns string)
+            volume = None
+            raw_volume = market.get("volume")
+            if raw_volume is not None:
+                try:
+                    volume = float(raw_volume)
+                except (ValueError, TypeError):
+                    pass
+
+            # Bid/ask for spread calculation
+            best_bid = market.get("bestBid")
+            best_ask = market.get("bestAsk")
+            yes_bid = float(best_bid) if best_bid else None
+
             return Contract(
                 exchange="polymarket",
                 id=market.get("conditionId") or market.get("id", ""),
                 title=market.get("question", market.get("title", "")),
-                yes_price=yes_price,
+                yes_price=float(best_ask) if best_ask else yes_price,
                 no_price=no_price,
                 end_date=end_date,
-                volume=market.get("volume"),
+                volume=volume,
+                yes_bid=yes_bid,
             )
         except (KeyError, TypeError, ValueError):
             return None

@@ -1,37 +1,45 @@
-"""Smart Order Router - finds best execution venue across exchanges."""
+"""Smart Order Router - selects optimal execution venues across exchanges.
+
+The router scores each venue using three components:
+1. COST: The price to execute (lower = better)
+2. SPREAD: Bid-ask spread as real-time liquidity measure (lower = better)
+3. VOLUME: Historical trading volume as secondary signal (higher = better)
+
+Final score = cost + spread_penalty + volume_penalty
+Lower score = better venue for execution.
+"""
 
 from dataclasses import dataclass
 
-from .models import Contract, MatchedPair
+from .contracts import Contract, MatchedPair
 
 
 @dataclass
-class LiquidityParams:
-    """Tunable liquidity penalty thresholds."""
-    penalty_none: float = 0.03      # No volume data
-    penalty_low: float = 0.05       # < $10k
-    penalty_medium: float = 0.02    # $10k-$50k
-    penalty_high: float = 0.01      # $50k-$100k
-    penalty_very_high: float = 0.0  # >= $100k
+class RouterConfig:
+    """Configuration for the smart order router scoring."""
+    # Fee rates by exchange
+    fee_rates: dict[str, float]
+
+    # Spread-based penalties (real-time liquidity)
+    spread_penalty_none: float = 0.02
+    spread_penalty_tight: float = 0.00      # < 2%
+    spread_penalty_medium: float = 0.01     # 2-5%
+    spread_penalty_wide: float = 0.03       # 5-10%
+    spread_penalty_very_wide: float = 0.05  # > 10%
+
+    # Volume-based penalties (historical liquidity)
+    volume_penalty_none: float = 0.02
+    volume_penalty_low: float = 0.03        # < $10k
+    volume_penalty_medium: float = 0.01     # $10k-$50k
+    volume_penalty_high: float = 0.005      # $50k-$100k
+    volume_penalty_very_high: float = 0.0   # >= $100k
 
 
 class SmartOrderRouter:
-    """
-    Selects optimal execution venues based on:
-    - Price (primary)
-    - Liquidity (volume-based penalty)
-    - Fees
+    """Routes orders to optimal venues based on cost, spread, and volume."""
 
-    Score = price + fee + liquidity_penalty (lower = better)
-    """
-
-    def __init__(
-        self,
-        fee_rates: dict[str, float] | None = None,
-        liquidity_params: LiquidityParams | None = None,
-    ):
-        self.fee_rates = fee_rates or {}
-        self.liq = liquidity_params or LiquidityParams()
+    def __init__(self, config: RouterConfig):
+        self.config = config
 
     def select_best_pair(
         self,
@@ -39,11 +47,10 @@ class SmartOrderRouter:
         match_type: str = "identical",
         similarity: float = 1.0,
     ) -> MatchedPair | None:
-        """
-        Given contracts for the same event on multiple exchanges,
-        select the best 2 venues for arbitrage.
+        """Select the best 2 venues from 3+ exchanges for an event.
 
-        Returns a MatchedPair with the two best-scored contracts.
+        When the same event exists on multiple exchanges, this picks
+        the two with the best combined score.
         """
         if len(contracts) < 2:
             return None
@@ -56,18 +63,10 @@ class SmartOrderRouter:
                 similarity=similarity,
             )
 
-        # Score each contract (average of YES and NO scores)
-        scored = []
-        for c in contracts:
-            yes_score = self._score(c, c.yes_price)
-            no_score = self._score(c, c.no_price)
-            avg_score = (yes_score + no_score) / 2
-            scored.append((avg_score, c))
-
-        # Sort by score (lower = better)
+        # Score each contract and pick best 2
+        scored = [(self._score(c), c) for c in contracts]
         scored.sort(key=lambda x: x[0])
 
-        # Return best 2 as a MatchedPair
         return MatchedPair(
             contract_a=scored[0][1],
             contract_b=scored[1][1],
@@ -75,25 +74,70 @@ class SmartOrderRouter:
             similarity=similarity,
         )
 
-    def _score(self, contract: Contract, price: float) -> float:
-        """Score a venue (lower = better)."""
-        if price <= 0:
-            return float("inf")
+    def _score(self, contract: Contract) -> float:
+        """Calculate venue score: cost + spread_penalty + volume_penalty.
 
-        fee_rate = self.fee_rates.get(contract.exchange, 0)
-        fee = fee_rate * price
+        Lower score = better venue.
+        """
+        # Component 1: Cost (price + fees)
+        price = (contract.yes_price + contract.no_price) / 2
+        fee_rate = self.config.fee_rates.get(contract.exchange, 0)
+        cost = price + (price * fee_rate)
 
-        # Liquidity penalty based on volume
+        # Component 2: Spread penalty (real-time liquidity)
+        spread_penalty = self._spread_penalty(contract)
+
+        # Component 3: Volume penalty (historical liquidity)
+        volume_penalty = self._volume_penalty(contract)
+
+        return cost + spread_penalty + volume_penalty
+
+    def _spread_penalty(self, contract: Contract) -> float:
+        """Calculate penalty based on bid-ask spread.
+
+        Spread = ask - bid. Tighter spread = more liquid = lower penalty.
+        """
+        spread = contract.spread
+        if spread is None:
+            return self.config.spread_penalty_none
+
+        # Convert to percentage
+        spread_pct = spread / contract.yes_price if contract.yes_price > 0 else 0
+
+        if spread_pct < 0.02:
+            return self.config.spread_penalty_tight
+        elif spread_pct < 0.05:
+            return self.config.spread_penalty_medium
+        elif spread_pct < 0.10:
+            return self.config.spread_penalty_wide
+        else:
+            return self.config.spread_penalty_very_wide
+
+    def _volume_penalty(self, contract: Contract) -> float:
+        """Calculate penalty based on historical volume.
+
+        Higher volume = more liquid = lower penalty.
+        """
         vol = contract.volume
         if vol is None:
-            liq_penalty = self.liq.penalty_none
-        elif vol < 10_000:
-            liq_penalty = self.liq.penalty_low
-        elif vol < 50_000:
-            liq_penalty = self.liq.penalty_medium
-        elif vol < 100_000:
-            liq_penalty = self.liq.penalty_high
-        else:
-            liq_penalty = self.liq.penalty_very_high
+            return self.config.volume_penalty_none
 
-        return price + fee + liq_penalty
+        if vol < 10_000:
+            return self.config.volume_penalty_low
+        elif vol < 50_000:
+            return self.config.volume_penalty_medium
+        elif vol < 100_000:
+            return self.config.volume_penalty_high
+        else:
+            return self.config.volume_penalty_very_high
+
+
+# Legacy compatibility - keep old interface working
+@dataclass
+class LiquidityParams:
+    """Deprecated: Use RouterConfig instead."""
+    penalty_none: float = 0.03
+    penalty_low: float = 0.05
+    penalty_medium: float = 0.02
+    penalty_high: float = 0.01
+    penalty_very_high: float = 0.0

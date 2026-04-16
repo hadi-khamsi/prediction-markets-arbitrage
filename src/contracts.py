@@ -8,10 +8,19 @@ class Contract:
     exchange: str           # "kalshi", "polymarket", "predictit"
     id: str                 # exchange-specific identifier
     title: str              # human-readable contract title
-    yes_price: float        # price for YES outcome (0.00-1.00)
-    no_price: float         # price for NO outcome (0.00-1.00)
+    yes_price: float        # ask price for YES (cost to buy)
+    no_price: float         # ask price for NO (cost to buy)
     end_date: datetime | None = None
     volume: float | None = None
+    yes_bid: float | None = None   # bid price for YES (for spread calc)
+    no_bid: float | None = None    # bid price for NO (for spread calc)
+
+    @property
+    def spread(self) -> float | None:
+        """Bid-ask spread as liquidity measure. Lower = more liquid."""
+        if self.yes_bid is not None:
+            return self.yes_price - self.yes_bid
+        return None
 
 
 @dataclass

@@ -5,11 +5,10 @@ from typing import Optional
 
 import requests
 
-from ..models import Contract
+from ..contracts import Contract
 
 BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 REQUEST_DELAY = 0.3  # seconds between paginated requests
-MAX_CONTRACTS = 500  # limit total contracts to fetch
 
 
 class KalshiClient:
@@ -54,8 +53,6 @@ class KalshiClient:
                     if contract.end_date > cutoff_date:
                         continue
                     contracts.append(contract)
-                    if len(contracts) >= MAX_CONTRACTS:
-                        return contracts
 
             cursor = data.get("cursor")
             if not cursor:
@@ -78,18 +75,17 @@ class KalshiClient:
                 end_date = parsed
 
             # Kalshi prices are in dollars (0.00-1.00)
-            yes_ask_str = market.get("yes_ask_dollars", "0")
-            no_ask_str = market.get("no_ask_dollars", "0")
-            last_price_str = market.get("last_price_dollars", "0")
+            yes_ask = float(market.get("yes_ask_dollars") or 0)
+            no_ask = float(market.get("no_ask_dollars") or 0)
+            yes_bid = float(market.get("yes_bid_dollars") or 0)
+            no_bid = float(market.get("no_bid_dollars") or 0)
+            last_price = float(market.get("last_price_dollars") or 0)
 
-            yes_price = float(yes_ask_str) if yes_ask_str else 0.0
-            no_price = float(no_ask_str) if no_ask_str else 0.0
-
-            # If no ask prices, use last price or derive
-            if yes_price == 0:
-                yes_price = float(last_price_str) if last_price_str else 0.5
-            if no_price == 0:
-                no_price = 1 - yes_price
+            # Fallback if no ask prices
+            if yes_ask == 0:
+                yes_ask = last_price if last_price else 0.5
+            if no_ask == 0:
+                no_ask = 1 - yes_ask
 
             # Build title from event + market subtitle
             event_title = event.get("title", "")
@@ -107,10 +103,12 @@ class KalshiClient:
                 exchange="kalshi",
                 id=market["ticker"],
                 title=title,
-                yes_price=yes_price,
-                no_price=no_price,
+                yes_price=yes_ask,
+                no_price=no_ask,
                 end_date=end_date,
                 volume=volume_dollars,
+                yes_bid=yes_bid if yes_bid > 0 else None,
+                no_bid=no_bid if no_bid > 0 else None,
             )
         except (KeyError, TypeError):
             return None

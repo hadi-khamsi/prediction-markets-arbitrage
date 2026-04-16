@@ -1,9 +1,11 @@
+"""Client for fetching market data from PredictIt."""
+
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests
 
-from ..models import Contract
+from ..contracts import Contract
 
 API_URL = "https://www.predictit.org/api/marketdata/all"
 
@@ -41,16 +43,21 @@ class PredictItClient:
             end_date = None
             end_date_str = contract.get("dateEnd") or market.get("dateEnd")
             if end_date_str and end_date_str not in ("N/A", "NA", "n/a", "na"):
-                # Parse and ensure timezone-aware (assume UTC if not specified)
                 parsed = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
                 if parsed.tzinfo is None:
                     parsed = parsed.replace(tzinfo=timezone.utc)
                 end_date = parsed
 
-            # PredictIt prices are in cents (0.01 = 1 cent, 0.99 = 99 cents)
-            # Already in 0-1 scale
-            yes_price = contract.get("bestBuyYesCost") or contract.get("lastTradePrice") or 0.5
-            no_price = contract.get("bestBuyNoCost") or (1 - yes_price)
+            # PredictIt has bid/ask as buy/sell costs
+            yes_ask = contract.get("bestBuyYesCost")  # cost to buy YES
+            yes_bid = contract.get("bestSellYesCost")  # price to sell YES
+            no_ask = contract.get("bestBuyNoCost")    # cost to buy NO
+            last_price = contract.get("lastTradePrice")
+
+            # Convert to float, fallback to last price
+            yes_price = float(yes_ask) if yes_ask else (float(last_price) if last_price else 0.5)
+            no_price = float(no_ask) if no_ask else (1 - yes_price)
+            yes_bid_val = float(yes_bid) if yes_bid else None
 
             # Build title: market name + contract name if different
             market_name = market.get("name", "")
@@ -64,10 +71,11 @@ class PredictItClient:
                 exchange="predictit",
                 id=str(contract.get("id", "")),
                 title=title,
-                yes_price=float(yes_price),
-                no_price=float(no_price),
+                yes_price=yes_price,
+                no_price=no_price,
                 end_date=end_date,
-                volume=None,  # PredictIt doesn't expose volume in public API
+                volume=None,  # PredictIt API doesn't expose volume
+                yes_bid=yes_bid_val,
             )
         except (KeyError, TypeError, ValueError):
             return None

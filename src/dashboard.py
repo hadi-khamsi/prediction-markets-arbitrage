@@ -1,10 +1,11 @@
 from datetime import datetime
 
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .models import Opportunity
+from .contracts import Opportunity
 
 # Short labels for exchanges
 EXCHANGE_LABELS = {
@@ -68,8 +69,12 @@ class Dashboard:
             return
 
         display_opps = opportunities
-        if self.max_rows > 0:
+        total_opps = len(opportunities)
+        if self.max_rows > 0 and len(opportunities) > self.max_rows:
             display_opps = opportunities[: self.max_rows]
+            panel_title = f"Top {self.max_rows} by Profit (of {total_opps} total)"
+        else:
+            panel_title = f"All {total_opps} Opportunities"
 
         table = Table(show_header=True, header_style="bold", box=None, expand=False, padding=(0, 1))
         table.add_column("#", width=2, no_wrap=True)
@@ -126,8 +131,8 @@ class Dashboard:
                 action,
             )
 
-        self.console.print(table)
-        self.console.print()
+        panel = Panel(table, title=panel_title, border_style="green")
+        self.console.print(panel)
         self.console.print("Ctrl+C to exit", style="dim")
 
     def _parse_volume(self, volume) -> float | None:

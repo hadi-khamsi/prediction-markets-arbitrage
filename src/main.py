@@ -15,8 +15,15 @@ from .dashboard import Dashboard
 from .exchanges import KalshiClient, PolymarketClient, PredictItClient
 from .llm_verifier import LLMVerifier
 from .matcher import ContractMatcher
-from .models import Contract, MatchedPair
-from .router import SmartOrderRouter, LiquidityParams
+from .contracts import Contract, MatchedPair
+from .router import SmartOrderRouter, RouterConfig
+
+
+def filter_by_volume(contracts: list[Contract], min_volume: float) -> list[Contract]:
+    """Filter contracts by minimum volume. Keeps contracts with unknown volume."""
+    if min_volume <= 0:
+        return contracts
+    return [c for c in contracts if c.volume is None or c.volume >= min_volume]
 
 
 def dedupe_matches(
@@ -27,7 +34,6 @@ def dedupe_matches(
     Deduplicate matches when same event exists on 3+ exchanges.
     Uses router to select best 2 venues.
     """
-    # Build graph: contract_id -> list of matches containing it
     contract_matches: dict[str, list[MatchedPair]] = {}
     for m in matches:
         key_a = f"{m.contract_a.exchange}:{m.contract_a.id}"
@@ -35,7 +41,6 @@ def dedupe_matches(
         contract_matches.setdefault(key_a, []).append(m)
         contract_matches.setdefault(key_b, []).append(m)
 
-    # Find triangles (3-way matches) and collect all contracts for same event
     processed = set()
     final_matches = []
 
@@ -47,13 +52,11 @@ def dedupe_matches(
         if pair_key in processed:
             continue
 
-        # Collect all contracts connected to this match
         contracts_by_exchange: dict[str, Contract] = {
             m.contract_a.exchange: m.contract_a,
             m.contract_b.exchange: m.contract_b,
         }
 
-        # Check if there's a third exchange connected
         for other_match in contract_matches.get(key_a, []) + contract_matches.get(key_b, []):
             if other_match == m:
                 continue
@@ -64,10 +67,8 @@ def dedupe_matches(
         contracts = list(contracts_by_exchange.values())
 
         if len(contracts) == 2:
-            # Only 2 exchanges, use as-is
             final_matches.append(m)
         else:
-            # 3+ exchanges, use router to pick best 2
             best_pair = router.select_best_pair(
                 contracts,
                 match_type=m.match_type,
@@ -76,7 +77,6 @@ def dedupe_matches(
             if best_pair:
                 final_matches.append(best_pair)
 
-        # Mark all pairs in this cluster as processed
         for c1 in contracts:
             for c2 in contracts:
                 if c1.exchange != c2.exchange:
@@ -115,15 +115,21 @@ def main():
         "predictit": config.PREDICTIT_FEE_RATE,
     }
 
-    liq_params = LiquidityParams(
-        penalty_none=config.LIQUIDITY_PENALTY_NONE,
-        penalty_low=config.LIQUIDITY_PENALTY_LOW,
-        penalty_medium=config.LIQUIDITY_PENALTY_MEDIUM,
-        penalty_high=config.LIQUIDITY_PENALTY_HIGH,
-        penalty_very_high=config.LIQUIDITY_PENALTY_VERY_HIGH,
+    router_config = RouterConfig(
+        fee_rates=fee_rates,
+        spread_penalty_none=config.SPREAD_PENALTY_NONE,
+        spread_penalty_tight=config.SPREAD_PENALTY_TIGHT,
+        spread_penalty_medium=config.SPREAD_PENALTY_MEDIUM,
+        spread_penalty_wide=config.SPREAD_PENALTY_WIDE,
+        spread_penalty_very_wide=config.SPREAD_PENALTY_VERY_WIDE,
+        volume_penalty_none=config.VOLUME_PENALTY_NONE,
+        volume_penalty_low=config.VOLUME_PENALTY_LOW,
+        volume_penalty_medium=config.VOLUME_PENALTY_MEDIUM,
+        volume_penalty_high=config.VOLUME_PENALTY_HIGH,
+        volume_penalty_very_high=config.VOLUME_PENALTY_VERY_HIGH,
     )
 
-    router = SmartOrderRouter(fee_rates=fee_rates, liquidity_params=liq_params)
+    router = SmartOrderRouter(config=router_config)
 
     calculator = ArbitrageCalculator(
         fee_rates=fee_rates,
@@ -148,8 +154,8 @@ def main():
             t0 = time_module.perf_counter()
             try:
                 kalshi_contracts = kalshi.fetch_markets(max_days=config.MAX_DAYS_OUT)
-            except Exception as e:
-                print(f"Error fetching Kalshi: {e}")
+                kalshi_contracts = filter_by_volume(kalshi_contracts, config.MIN_VOLUME)
+            except Exception:
                 kalshi_contracts = []
             latencies["kalshi"] = int((time_module.perf_counter() - t0) * 1000)
             exchange_counts["kalshi"] = len(kalshi_contracts)
@@ -157,25 +163,25 @@ def main():
             t0 = time_module.perf_counter()
             try:
                 poly_contracts = polymarket.fetch_markets(max_days=config.MAX_DAYS_OUT)
-            except Exception as e:
-                print(f"Error fetching Polymarket: {e}")
+                poly_contracts = filter_by_volume(poly_contracts, config.MIN_VOLUME)
+            except Exception:
                 poly_contracts = []
             latencies["polymarket"] = int((time_module.perf_counter() - t0) * 1000)
             exchange_counts["polymarket"] = len(poly_contracts)
 
             t0 = time_module.perf_counter()
             try:
-                pi_contracts = predictit.fetch_markets(max_days=config.MAX_DAYS_OUT)
-            except Exception as e:
-                print(f"Error fetching PredictIt: {e}")
-                pi_contracts = []
+                # PredictIt has no volume data, skip volume filter for it
+                predictit_contracts = predictit.fetch_markets(max_days=config.MAX_DAYS_OUT)
+            except Exception:
+                predictit_contracts = []
             latencies["predictit"] = int((time_module.perf_counter() - t0) * 1000)
-            exchange_counts["predictit"] = len(pi_contracts)
+            exchange_counts["predictit"] = len(predictit_contracts)
 
             # Match all pairwise combinations
             matches_kp = matcher.find_matches(kalshi_contracts, poly_contracts)
-            matches_kpi = matcher.find_matches(kalshi_contracts, pi_contracts)
-            matches_ppi = matcher.find_matches(poly_contracts, pi_contracts)
+            matches_kpi = matcher.find_matches(kalshi_contracts, predictit_contracts)
+            matches_ppi = matcher.find_matches(poly_contracts, predictit_contracts)
             all_matches = matches_kp + matches_kpi + matches_ppi
 
             # Dedupe: when same event is on 3 exchanges, router picks best 2
